@@ -1,4 +1,7 @@
 require('dotenv').config();
+const path = require("path");
+
+
 const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
@@ -14,6 +17,7 @@ const upload = require("./utils/multer");
 const app = express();
 
 app.use(express.static("public"));
+app.use(express.static(path.join(__dirname, "client", "build")));
 
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({
