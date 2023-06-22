@@ -14,6 +14,7 @@ const upload = require("./utils/multer");
 const app = express();
 
 app.use(express.static("public"));
+
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({
   extended: true
@@ -22,8 +23,10 @@ app.use(bodyParser.urlencoded({
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  keys: ['your-secret-key'] // Replace 'your-secret-key' with your actual secret key or an array of keys
 }));
+
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -34,6 +37,7 @@ mongoose.connect(process.env.MONGO_URL, {
   useFindAndModify: false
 });
 mongoose.set("useCreateIndex", true);
+
 
 const productSchema = new mongoose.Schema({
   name: String,
