@@ -1,36 +1,42 @@
-require('dotenv').config();
-const path = require("path");
-
-
+require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const session = require("cookie-session");
+const session = require("express-session");
 const passport = require("passport");
 const passportLocalMongoose = require("passport-local-mongoose");
-const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const findOrCreate = require("mongoose-findorcreate");
 const cloudinary = require("./utils/cloudinary");
 const upload = require("./utils/multer");
-
+const MongoStore = require("connect-mongo");
 const app = express();
 
+const PORT = process.env.PORT || 5000;
 app.use(express.static("public"));
-app.use(express.static(path.join(__dirname, "client", "build")));
-
 app.set("view engine", "ejs");
-app.use(bodyParser.urlencoded({
-  extended: true
-}));
+app.use(
+  bodyParser.urlencoded({
+    extended: true,
+  })
+);
 
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  keys: ['your-secret-key'] // Replace 'your-secret-key' with your actual secret key or an array of keys
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
 
+    cookie: {
+      maxAge: 60 * 60 * 24 * 90 * 1000,
+    },
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGO_URL,
+      dbName: process.env.DB,
+    }),
+  })
+);
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -38,10 +44,10 @@ app.use(passport.session());
 mongoose.connect(process.env.MONGO_URL, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  useFindAndModify: false
+  useFindAndModify: false,
+  dbName: process.env.DB,
 });
 mongoose.set("useCreateIndex", true);
-
 
 const productSchema = new mongoose.Schema({
   name: String,
@@ -51,7 +57,7 @@ const productSchema = new mongoose.Schema({
   seller: [mongoose.Schema.Types.ObjectId],
   sellerName: String,
   image: String,
-  cloudinary_id: String
+  cloudinary_id: String,
 });
 
 const userSchema = new mongoose.Schema({
@@ -59,6 +65,7 @@ const userSchema = new mongoose.Schema({
   email: String,
   contact: String,
   googleId: String,
+  username: String,
 });
 
 userSchema.plugin(passportLocalMongoose);
@@ -69,12 +76,12 @@ const Product = new mongoose.model("Product", productSchema);
 
 passport.use(User.createStrategy());
 
-passport.serializeUser(function(user, done) {
+passport.serializeUser(function (user, done) {
   done(null, user.id);
 });
 
-passport.deserializeUser(function(id, done) {
-  User.findById(id, function(err, user) {
+passport.deserializeUser(function (id, done) {
+  User.findById(id, function (err, user) {
     done(err, user);
   });
 });
@@ -84,14 +91,19 @@ passport.use(
     {
       clientID: process.env.CLIENT_ID,
       clientSecret: process.env.CLIENT_SECRET,
-      callbackURL: "https://www.bartarapp-production.up.railway.app/login/auth/google/home",
-      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
+      callbackURL: "/auth/google/home",
     },
-    function(accessToken, refreshToken, profile, cb) {
+    function (accessToken, refreshToken, profile, cb) {
+      //console.log(profile);
+      //console.log(profile.photos[0].value);
       User.findOrCreate(
         { googleId: profile.id },
-        { name: profile.displayName, email: profile.emails[0].value },
-        function(err, user) {
+        {
+          name: profile.displayName,
+          email: profile.emails[0].value,
+          username: profile.emails[0].value,
+        },
+        function (err, user) {
           return cb(err, user);
         }
       );
@@ -99,25 +111,29 @@ passport.use(
   )
 );
 
-app.get("/auth/google", passport.authenticate("google", { scope: ['profile', 'email'] }));
+app.get(
+  "/auth/google",
+  passport.authenticate("google", { scope: ["profile", "email"] })
+);
 
-app.get("/login/auth/google/home",
-  passport.authenticate('google', { failureRedirect: '/login' }),
-  function(req, res) {
+app.get(
+  "/auth/google/home",
+  passport.authenticate("google", { failureRedirect: "/login" }),
+  function (req, res) {
     // Successful authentication, redirect home.
-    res.redirect('/home');
+    res.redirect("/home");
   }
 );
 
-app.get("/login", function(req, res) {
+app.get("/login", function (req, res) {
   res.render("login");
 });
 
-app.get("/signup", function(req, res) {
+app.get("/signup", function (req, res) {
   res.render("signup");
 });
 
-app.get("/", function(req, res) {
+app.get("/", function (req, res) {
   if (req.isAuthenticated()) {
     res.redirect("/home");
   } else {
@@ -125,7 +141,7 @@ app.get("/", function(req, res) {
   }
 });
 
-app.get("/home", function(req, res) {
+app.get("/home", function (req, res) {
   if (req.isAuthenticated()) {
     res.render("home", { user: req.user });
   } else {
@@ -133,7 +149,7 @@ app.get("/home", function(req, res) {
   }
 });
 
-app.get("/working", function(req, res) {
+app.get("/working", function (req, res) {
   if (req.isAuthenticated()) {
     res.render("working", { user: req.user });
   } else {
@@ -141,7 +157,7 @@ app.get("/working", function(req, res) {
   }
 });
 
-app.get("/about", function(req, res) {
+app.get("/about", function (req, res) {
   if (req.isAuthenticated()) {
     res.render("about", { user: req.user });
   } else {
@@ -149,7 +165,7 @@ app.get("/about", function(req, res) {
   }
 });
 
-app.get("/add", function(req, res) {
+app.get("/add", function (req, res) {
   if (req.isAuthenticated()) {
     res.render("add", { user: req.user });
   } else {
@@ -157,12 +173,11 @@ app.get("/add", function(req, res) {
   }
 });
 
-app.get("/profile", function(req, res) {
+app.get("/profile", function (req, res) {
   if (req.isAuthenticated()) {
-    Product.find({ seller: req.user._id }, function(err, foundProducts) {
-      if (err) {
-        console.log(err);
-      } else {
+    Product.find({ seller: req.user._id }, function (err, foundProducts) {
+      if (err) console.log(err);
+      else {
         res.render("profile", { user: req.user, product: foundProducts });
       }
     });
@@ -171,22 +186,20 @@ app.get("/profile", function(req, res) {
   }
 });
 
-app.get("/category/:type", function(req, res) {
+app.get("/category/:type", function (req, res) {
   if (req.isAuthenticated()) {
     const type = req.params.type;
     if (type === "All") {
-      Product.find({}, function(err, foundProducts) {
-        if (err) {
-          console.log(err);
-        } else {
+      Product.find({}, function (err, foundProducts) {
+        if (err) console.log(err);
+        else {
           res.render("category", { user: req.user, product: foundProducts });
         }
       });
     } else {
-      Product.find({ type: type }, function(err, foundProducts) {
-        if (err) {
-          console.log(err);
-        } else {
+      Product.find({ type: type }, function (err, foundProducts) {
+        if (err) console.log(err);
+        else {
           res.render("category", { user: req.user, product: foundProducts });
         }
       });
@@ -196,18 +209,21 @@ app.get("/category/:type", function(req, res) {
   }
 });
 
-app.get("/seller/:sellerId", function(req, res) {
+app.get("/seller/:sellerId", function (req, res) {
   if (req.isAuthenticated()) {
     const sellerId = req.params.sellerId;
-    User.findById(sellerId, function(err, foundUser) {
-      if (err) {
-        console.log(err);
-      } else {
-        Product.find({ seller: foundUser._id }, function(err, foundProducts) {
-          if (err) {
-            console.log(err);
-          } else {
-            res.render("seller", { user: req.user, seller: foundUser, product: foundProducts });
+    //console.log(sellerId);
+    User.findById(sellerId, function (err, foundUser) {
+      if (err) console.log(err);
+      else {
+        Product.find({ seller: foundUser._id }, function (err, foundProducts) {
+          if (err) console.log(err);
+          else {
+            res.render("seller", {
+              user: req.user,
+              seller: foundUser,
+              product: foundProducts,
+            });
           }
         });
       }
@@ -217,7 +233,7 @@ app.get("/seller/:sellerId", function(req, res) {
   }
 });
 
-app.get("/delete/:productId", async function(req, res) {
+app.get("/delete/:productId", async function (req, res) {
   try {
     const foundproduct = await Product.findById(req.params.productId);
     await cloudinary.uploader.destroy(foundproduct.cloudinary_id);
@@ -229,7 +245,7 @@ app.get("/delete/:productId", async function(req, res) {
   }
 });
 
-app.get("/edit", function(req, res) {
+app.get("/edit", function (req, res) {
   if (req.isAuthenticated()) {
     res.render("edit", { user: req.user });
   } else {
@@ -237,70 +253,122 @@ app.get("/edit", function(req, res) {
   }
 });
 
-app.get("/logout", function(req, res) {
-  req.logout();
-  res.redirect("/");
+app.get("/logout", function (req, res) {
+  req.logout(function (err) {
+    if (err) {
+      // Handle any potential errors
+      console.error(err);
+    }
+    res.redirect("/");
+  });
 });
 
-app.post("/signup", function(req, res) {
-  User.register({ username: req.body.username, name: req.body.fullname }, req.body.password, function(err, user) {
-    if (err) {
-      console.log(err);
-      res.redirect("/login");
-    } else {
-      passport.authenticate("local")(req, res, function() {
-        const userEmail = req.user.username;
-        User.findOneAndUpdate({ _id: req.user._id }, { $set: { email: userEmail } }, { upsert: true }, function(err, doc) {
-          if (err)
-            console.log(err);
-          else
-            console.log("updated");
+app.post("/signup", function (req, res) {
+  User.register(
+    { username: req.body.username, name: req.body.fullname, contact: req.body.contact, email: req.body.username },
+    req.body.password,
+    function (err, user) {
+      if (err) {
+        console.log(err);
+        res.redirect("/login");
+      } else {
+        passport.authenticate("local")(req, res, function () {
+          //console.log(req.user);
+          // const userEmail = req.user.username;
+          // User.findOneAndUpdate(
+          //   { _id: req.user._id },
+          //   { $set: { email: userEmail } },
+          //   { upsert: true },
+          //   function (err, doc) {
+          //     if (err) console.log(err);
+          //     else console.log("updated");
+          //   }
+          // );
+          res.redirect("/home");
         });
-        res.redirect("/home");
-      });
+      }
     }
-  });
+  );
 });
 
-app.post("/login", function(req, res) {
+app.post("/login", function (req, res) {
   const user = new User({
-    username: req.body.username,
-    password: req.body.password
+    email: req.body.username,
+    password: req.body.password,
   });
 
-  req.login(user, function(err) {
-    if (err) {
-      console.log(err);
-    } else {
-      passport.authenticate("local")(req, res, function() {
+  req.login(user, function (err) {
+    if (err) console.log(err);
+    else {
+      passport.authenticate("local")(req, res, function () {
         res.redirect("/home");
       });
     }
   });
 });
 
-app.post("/add", upload.single("image"), async function(req, res) {
+// app.post("/add",function(req,res){
+//   //console.log(req.file);
+//   let product = new Product({
+//     name:req.body.name,
+//     price:req.body.price,
+//     description:req.body.description,
+//     type:req.body.radio,
+//     seller:req.user._id,
+//     sellerName:req.user.username,
+//   });
+//
+//   product.save();
+//
+//   res.redirect("/category/All");
+// });
+
+app.post("/add", upload.single("image"), async (req, res) => {
   try {
+    //Upload image to cloudinary
+    //console.log(req.file);
     const result = await cloudinary.uploader.upload(req.file.path);
 
-    const newProduct = new Product({
+    // Create new user
+    let product = new Product({
       name: req.body.name,
       price: req.body.price,
       description: req.body.description,
-      type: req.body.type,
+      type: req.body.radio,
       seller: req.user._id,
       sellerName: req.user.name,
       image: result.secure_url,
-      cloudinary_id: result.public_id
+      cloudinary_id: result.public_id,
     });
-
-    await newProduct.save();
-    res.redirect("/profile");
+    // Save user
+    await product.save();
+    //res.json(product);
+    res.redirect("/category/All");
   } catch (err) {
     console.log(err);
   }
 });
 
-app.listen(4545, function() {
-  console.log("Server started on port 4545");
+app.post("/edit", function (req, res) {
+  User.findOneAndUpdate(
+    { _id: req.user._id },
+    {
+      $set: {
+        name: req.body.name,
+        email: req.body.email,
+        contact: req.body.contact,
+      },
+    },
+    { upsert: true },
+    function (err, doc) {
+      if (err) console.log(err);
+      else console.log("updated");
+    }
+  );
+  res.redirect("/profile");
+});
+
+
+app.listen(PORT, function () {
+  console.log(`server is listening to port ${PORT}.`);
 });
